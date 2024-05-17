@@ -19,8 +19,8 @@ var (
 		Help: "Size of the backup in bytes.",
 	})
 	diskUsage = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "disk_usage_bytes",
-		Help: "Disk usage in bytes.",
+		Name: "disk_usage_G",
+		Help: "Disk usage in G.",
 	})
 	percentageUse = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "disk_usage_percentage",
@@ -81,7 +81,7 @@ func getBackupSize() float64 {
 		return 0
 	}
 	backupSizeGb := float64(backupSize)
-	return backupSizeGb / (1024.0 * 1024.0 * 1024.0)
+	return backupSizeGb
 }
 
 func getDiskUsage() (float64, error) {
@@ -102,18 +102,38 @@ func getDiskUsage() (float64, error) {
 	return usageValue, nil
 }
 
-func getDiskUsagePercentage() float64 {
-	return 50.0 // Exemplo: 50%
+func getDiskUsagePercentage() (float64, error) {
+	cmd := exec.Command("df", "-h", "/")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("error getting disk usage percentage: %v", err)
+	}
+	lines := strings.Split(string(output), "\n")
+	if len(lines) < 2 {
+		return 0, fmt.Errorf("unexpected output format")
+	}
+	percentUseStr := strings.Fields(lines[1])[4]
+	percentUseStr = strings.TrimSuffix(percentUseStr, "%")
+	percentUse, err := strconv.ParseFloat(percentUseStr, 64)
+	if err != nil {
+		return 0, fmt.Errorf("error parsing disk usage percentage: %v", err)
+	}
+	return percentUse, nil
 }
 
 func updateMetrics() {
 	backupSize.Set(getBackupSize())
-	percentageUse.Set(getDiskUsagePercentage())
 	usage, err := getDiskUsage()
 	if err != nil {
 		fmt.Println(err)
 	} else {
 		diskUsage.Set(usage / (1024.0 * 1024.0 * 1024.0))
+	}
+	percentUse, err := getDiskUsagePercentage()
+	if err != nil {
+		fmt.Println(err)
+	} else {
+		percentageUse.Set(percentUse)
 	}
 
 }
