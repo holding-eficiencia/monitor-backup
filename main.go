@@ -3,153 +3,112 @@ package main
 import (
 	"fmt"
 	"net/http"
-	"os/exec"
-	"strconv"
-	"strings"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	log "github.com/sirupsen/logrus"
 )
 
-// Definir métricas
 var (
-	backupSize = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "backup_size_bytes",
-		Help: "Size of the backup in bytes.",
+	backupStatus = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "backup_file_status",
+		Help: "Indicates if the backup file was created (1) or not (0)",
 	})
-	diskUsage = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "disk_usage_G",
-		Help: "Disk usage in G.",
+	lastBackupTimestamp = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "last_backup_file_timestamp",
+		Help: "Timestamp of the last backup file",
 	})
-	percentageUse = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "disk_usage_percentage",
-		Help: "Percentage of disk used.",
-	})
-	currentDate = prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-		Name: "current_date_timestamp",
-		Help: "Current date as a Unix timestamp.",
-	}, func() float64 {
-		return float64(time.Now().Unix())
-	})
+	lastBackupFileName = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "last_backup_file_name",
+		Help: "Name of the last backup file",
+	}, []string{"filename"})
+	lastBackupSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "last_backup_size",
+		Help: "Size of last backup file",
+	}, []string{"size"})
+	backupFolderSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "backup_folder_size",
+		Help: "Size of backups folder",
+	}, []string{"folder_size"})
 )
 
 func init() {
-	// Registrar as métricas no registrador padrão
-	prometheus.MustRegister(backupSize)
-	prometheus.MustRegister(diskUsage)
-	prometheus.MustRegister(percentageUse)
-	prometheus.MustRegister(currentDate)
+	prometheus.MustRegister(backupStatus)
+	prometheus.MustRegister(lastBackupTimestamp)
+	prometheus.MustRegister(lastBackupFileName)
+	prometheus.MustRegister(lastBackupSize)
+	prometheus.MustRegister(backupFolderSize)
 }
 
-func parseSize(sizeStr string) (float64, error) {
-	var multiplier float64
-	sizeStr = strings.TrimSpace(sizeStr)
-	switch {
-	case strings.HasSuffix(sizeStr, "G"):
-		multiplier = 1024 * 1024 * 1024
-		sizeStr = strings.TrimSuffix(sizeStr, "G")
-	case strings.HasSuffix(sizeStr, "M"):
-		multiplier = 1024 * 1024
-		sizeStr = strings.TrimSuffix(sizeStr, "M")
-	case strings.HasSuffix(sizeStr, "K"):
-		multiplier = 1024
-		sizeStr = strings.TrimSuffix(sizeStr, "K")
-	default:
-		multiplier = 1
+func checkBackupFiles() {
+	backupDirectory := "/home/danielnasc/c/bash/eficiencia-scripts/database-backups/backups"
+	var latestFile string
+	var latestModTime time.Time
+	var totalFolderSize int64
+
+	err := filepath.Walk(backupDirectory, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			totalFolderSize += info.Size()
+			if info.ModTime().After(latestModTime) {
+				latestModTime = info.ModTime()
+				latestFile = path
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		log.Error("Error walking the path: ", err)
+		backupStatus.Set(0)
+		return
 	}
 
-	sizeValue, err := strconv.ParseFloat(sizeStr, 64)
-	if err != nil {
-		return 0, err
-	}
-
-	return sizeValue * multiplier, nil
-}
-
-func getBackupSize() float64 {
-	cmd := exec.Command("du", "-s", "/home/a/Área de Trabalho/backup")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		fmt.Println("Error getting backup size:", err)
-		return 0
-	}
-	backupSizeStr := strings.Split(string(output), "\t")[0]
-	backupSize, err := strconv.Atoi(backupSizeStr)
-	if err != nil {
-		fmt.Println("Error converting backup size to integer:", err)
-		return 0
-	}
-	backupSizeGb := float64(backupSize)
-	return backupSizeGb
-}
-
-func getDiskUsage() (float64, error) {
-	cmd := exec.Command("df", "-h", "/")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return 0, fmt.Errorf("error getting disk usage: %v", err)
-	}
-	lines := strings.Split(string(output), "\n")
-	if len(lines) < 2 {
-		return 0, fmt.Errorf("unexpected output format")
-	}
-	usageLine := strings.Fields(lines[1])[2]
-	usageValue, err := parseSize(usageLine)
-	if err != nil {
-		return 0, fmt.Errorf("error parsing disk usage: %v", err)
-	}
-	return usageValue, nil
-}
-
-func getDiskUsagePercentage() (float64, error) {
-	cmd := exec.Command("df", "-h", "/")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return 0, fmt.Errorf("error getting disk usage percentage: %v", err)
-	}
-	lines := strings.Split(string(output), "\n")
-	if len(lines) < 2 {
-		return 0, fmt.Errorf("unexpected output format")
-	}
-	percentUseStr := strings.Fields(lines[1])[4]
-	percentUseStr = strings.TrimSuffix(percentUseStr, "%")
-	percentUse, err := strconv.ParseFloat(percentUseStr, 64)
-	if err != nil {
-		return 0, fmt.Errorf("error parsing disk usage percentage: %v", err)
-	}
-	return percentUse, nil
-}
-
-func updateMetrics() {
-	backupSize.Set(getBackupSize())
-	usage, err := getDiskUsage()
-	if err != nil {
-		fmt.Println(err)
+	if latestFile == "" {
+		backupStatus.Set(0)
 	} else {
-		diskUsage.Set(usage / (1024.0 * 1024.0 * 1024.0))
-	}
-	percentUse, err := getDiskUsagePercentage()
-	if err != nil {
-		fmt.Println(err)
-	} else {
-		percentageUse.Set(percentUse)
+		backupStatus.Set(1)
+		lastBackupTimestamp.Set(float64(latestModTime.Unix()))
+		lastBackupFileName.With(prometheus.Labels{"filename": latestFile}).Set(1)
+
+		info, err := os.Stat(latestFile)
+		if err != nil {
+			log.Error("Error getting file info: ", err)
+		} else {
+			lastBackupSize.With(prometheus.Labels{"size": formatBytes(info.Size())}).Set(float64(info.Size()))
+		}
 	}
 
+	backupFolderSize.With(prometheus.Labels{"folder_size": formatBytes(totalFolderSize)}).Set(float64(totalFolderSize))
+}
+
+func formatBytes(bytes int64) string {
+	const unit = 1000
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "kMGTPE"[exp])
 }
 
 func main() {
-	// Atualiza as métricas periodicamente (por exemplo, a cada 10 segundos)
 	go func() {
 		for {
-			updateMetrics()
-			time.Sleep(10 * time.Second)
+			checkBackupFiles()
+			time.Sleep(2 * time.Second)
 		}
 	}()
 
-	// Endpoint para expor as métricas
 	http.Handle("/metrics", promhttp.Handler())
-
-	fmt.Println("Listening on :8081")
-	http.ListenAndServe(":8081", nil)
+	log.Info("Beginning to serve on port :8085")
+	log.Fatal(http.ListenAndServe(":8085", nil))
 }
