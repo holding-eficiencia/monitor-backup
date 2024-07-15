@@ -21,18 +21,18 @@ var (
 		Name: "last_backup_file_timestamp",
 		Help: "Timestamp of the last backup file",
 	})
-	lastBackupFileName = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	lastBackupFileName = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "last_backup_file_name",
 		Help: "Name of the last backup file",
-	}, []string{"filename"})
-	lastBackupSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	})
+	lastBackupSize = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "last_backup_size",
 		Help: "Size of last backup file",
-	}, []string{"size"})
-	backupFolderSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	})
+	backupFolderSize = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "backup_folder_size",
 		Help: "Size of backups folder",
-	}, []string{"folder_size"})
+	})
 )
 
 func init() {
@@ -48,6 +48,7 @@ func checkBackupFiles() {
 	var latestFile string
 	var latestModTime time.Time
 	var totalFolderSize int64
+	var lastBackupFileInfo os.FileInfo
 
 	err := filepath.Walk(backupDirectory, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -58,6 +59,7 @@ func checkBackupFiles() {
 			if info.ModTime().After(latestModTime) {
 				latestModTime = info.ModTime()
 				latestFile = path
+				lastBackupFileInfo = info
 			}
 		}
 		return nil
@@ -72,19 +74,24 @@ func checkBackupFiles() {
 	if latestFile == "" {
 		backupStatus.Set(0)
 	} else {
-		backupStatus.Set(1)
+		if time.Since(lastBackupFileInfo.ModTime()) > 24*time.Hour {
+			backupStatus.Set(0)
+		} else {
+			backupStatus.Set(1)
+		}
+
 		lastBackupTimestamp.Set(float64(latestModTime.Unix()))
-		lastBackupFileName.With(prometheus.Labels{"filename": latestFile}).Set(1)
+		lastBackupFileName.Set(1)
 
 		info, err := os.Stat(latestFile)
 		if err != nil {
 			log.Error("Error getting file info: ", err)
 		} else {
-			lastBackupSize.With(prometheus.Labels{"size": formatBytes(info.Size())}).Set(float64(info.Size()))
+			lastBackupSize.Set(float64(info.Size()))
 		}
 	}
 
-	backupFolderSize.With(prometheus.Labels{"folder_size": formatBytes(totalFolderSize)}).Set(float64(totalFolderSize))
+	backupFolderSize.Set(float64(totalFolderSize))
 }
 
 func formatBytes(bytes int64) string {
@@ -109,6 +116,6 @@ func main() {
 	}()
 
 	http.Handle("/metrics", promhttp.Handler())
-	log.Info("Beginning to serve on port :8085")
+	log.Info("Beginning to serve on url http://localhost:8085/metrics")
 	log.Fatal(http.ListenAndServe(":8085", nil))
 }
