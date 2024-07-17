@@ -80,7 +80,7 @@ func checkBackupFiles() {
 			backupStatus.Set(1)
 		}
 
-		lastBackupTimestamp.Set(float64(latestModTime.Unix()))
+		lastBackupTimestamp.Set(float64(latestModTime.UnixMilli()))
 		lastBackupFileName.Set(1)
 
 		info, err := os.Stat(latestFile)
