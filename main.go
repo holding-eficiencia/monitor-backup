@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -50,10 +52,11 @@ func checkBackupFiles() {
 	var lastBackupFileInfo os.FileInfo
 
 	err := filepath.Walk(backupDirectory, func(path string, info os.FileInfo, err error) error {
+
 		if err != nil {
 			return err
 		}
-		if !info.IsDir() {
+		if !info.IsDir() && strings.HasPrefix(info.Name(), "simec_backup") {
 			totalFolderSize += info.Size()
 			if info.ModTime().After(latestModTime) {
 				latestModTime = info.ModTime()
@@ -86,6 +89,7 @@ func checkBackupFiles() {
 		if err != nil {
 			log.Error("Error getting file info: ", err)
 		} else {
+			fmt.Println(info.Name())
 			lastBackupSize.Set(float64(info.Size()))
 		}
 	}

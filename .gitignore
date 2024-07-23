@@ -1,1 +1,4 @@
 .env
+prometheus
+docker-compose.yml
+backups-exporter
