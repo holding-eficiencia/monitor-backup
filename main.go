@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -44,7 +43,7 @@ func init() {
 }
 
 func checkBackupFiles() {
-	backupDirectory := "/home/danielnasc/c/bash/eficiencia-scripts/database-backups/backups"
+	backupDirectory := "/home/ops-ufca/mysql-backup"
 	var latestFile string
 	var latestModTime time.Time
 	var totalFolderSize int64
@@ -92,19 +91,6 @@ func checkBackupFiles() {
 	}
 
 	backupFolderSize.Set(float64(totalFolderSize))
-}
-
-func formatBytes(bytes int64) string {
-	const unit = 1000
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "kMGTPE"[exp])
 }
 
 func main() {
